@@ -26,6 +26,10 @@
   button.secondary { background: #e0e0e0; color: #222; }
   button.small { font-size: 14px; padding: 8px 10px; }
   button:disabled { opacity: 0.5; }
+  a.btn { display: inline-block; font-size: 14px; padding: 8px 10px; border-radius: 8px; background: #1b5e20; color: #fff; text-decoration: none; text-align: center; }
+  a.btn:active { opacity: 0.85; }
+  .info-line { font-size: 13px; color: #333; margin-bottom: 4px; }
+  .info-line a { color: #1b5e20; font-weight: 600; }
   input[type="text"], input[type="number"] { width: 100%; font-size: 16px; padding: 10px; border: 1px solid #bbb; border-radius: 8px; margin-bottom: 8px; }
   label { display: block; font-size: 14px; margin: 6px 0 4px; }
   .row { display: flex; gap: 8px; }
@@ -94,7 +98,7 @@
 </main>
 <footer>
   Station data: OpenStreetMap — coverage varies by area.<br>
-  Fit reports are from this phone only for now.
+  Fit, fee, and water reports are from this phone only for now.
 </footer>
 
 <script>
@@ -223,10 +227,75 @@
   function stationTagLine(s) {
     var bits = [];
     var t = s.tags || {};
-    if (t.fee) bits.push("Fee: " + t.fee);
     if (t.opening_hours) bits.push("Hours: " + t.opening_hours);
     if (t.access) bits.push("Access: " + t.access);
     return bits.join(" · ");
+  }
+
+  // ---- per-station camper reports: fee + potable water (this phone only) ----
+  function getStationInfo() {
+    try { return JSON.parse(localStorage.getItem("dumpit_station_info") || "{}"); }
+    catch (e) { return {}; }
+  }
+  function saveStationInfo(o) {
+    localStorage.setItem("dumpit_station_info", JSON.stringify(o));
+  }
+  function todayStr() { return new Date().toISOString().slice(0, 10); }
+
+  function feeText(s) {
+    var info = getStationInfo()[s.key] || {};
+    if (info.fee) {
+      return info.fee === "free"
+        ? "Fee: reported free (" + info.feeDate + ")"
+        : "Fee: campers report $" + info.fee + " (" + info.feeDate + ")";
+    }
+    var t = s.tags || {};
+    if (t.fee) return "Fee: " + t.fee;
+    return "Fee: not listed";
+  }
+
+  function waterText(s) {
+    var info = getStationInfo()[s.key] || {};
+    if (info.water) {
+      return "Water: campers report " +
+        (info.water === "yes" ? "potable water available" : "no potable water") +
+        " (" + info.waterDate + ")";
+    }
+    var t = s.tags || {};
+    if (t.drinking_water === "yes") return "Water: potable water available";
+    if (t.drinking_water === "no") return "Water: no potable water";
+    return "Water: unknown";
+  }
+
+  function recordFee(key) {
+    var raw = prompt("Dump fee at this station?\nEnter a number like 5, or 0 if it's free.");
+    if (raw === null) return;
+    raw = raw.trim().replace(/^\$/, "");
+    if (raw === "" || isNaN(parseFloat(raw))) {
+      showError("Couldn't understand that fee — try a number like 5, or 0 for free.");
+      return;
+    }
+    clearError();
+    var info = getStationInfo();
+    var rec = info[key] || {};
+    rec.fee = parseFloat(raw) === 0 ? "free" : String(parseFloat(raw));
+    rec.feeDate = todayStr();
+    info[key] = rec;
+    saveStationInfo(info);
+    setStatus("Thanks — fee recorded.");
+    renderList();
+  }
+
+  function recordWater(key) {
+    var yes = confirm("Does this station have POTABLE drinking water?\n\nTap OK for YES, Cancel for NO.");
+    var info = getStationInfo();
+    var rec = info[key] || {};
+    rec.water = yes ? "yes" : "no";
+    rec.waterDate = todayStr();
+    info[key] = rec;
+    saveStationInfo(info);
+    setStatus("Thanks — water info recorded.");
+    renderList();
   }
 
   function drawMarkers() {
@@ -293,6 +362,37 @@
         tg.textContent = tagLine;
         div.appendChild(tg);
       }
+      var feeLine = document.createElement("div");
+      feeLine.className = "info-line";
+      feeLine.textContent = feeText(s);
+      div.appendChild(feeLine);
+      var waterLine = document.createElement("div");
+      waterLine.className = "info-line";
+      waterLine.textContent = waterText(s);
+      div.appendChild(waterLine);
+      var t = s.tags || {};
+      var phone = t.phone || t["contact:phone"];
+      var website = t.website || t["contact:website"];
+      if (phone || website) {
+        var contactLine = document.createElement("div");
+        contactLine.className = "info-line";
+        if (phone) {
+          var callLink = document.createElement("a");
+          callLink.href = "tel:" + phone.replace(/[^+\d]/g, "");
+          callLink.textContent = "Call " + phone;
+          contactLine.appendChild(callLink);
+        }
+        if (phone && website) contactLine.appendChild(document.createTextNode(" · "));
+        if (website) {
+          var webLink = document.createElement("a");
+          webLink.href = website;
+          webLink.target = "_blank";
+          webLink.rel = "noopener";
+          webLink.textContent = "Website";
+          contactLine.appendChild(webLink);
+        }
+        div.appendChild(contactLine);
+      }
       var fits = stationFits(key);
       if (fits && fits.length) {
         var fn = document.createElement("div");
@@ -309,6 +409,24 @@
       var row = document.createElement("div");
       row.className = "fit-row";
       row.style.marginTop = "8px";
+      var nav = document.createElement("a");
+      nav.className = "btn";
+      nav.textContent = "Navigate";
+      nav.href = "https://www.google.com/maps/dir/?api=1&destination=" + s.lat.toFixed(5) + "," + s.lon.toFixed(5);
+      nav.target = "_blank";
+      nav.rel = "noopener";
+      var bMap = document.createElement("button");
+      bMap.className = "small secondary";
+      bMap.textContent = "Show on map";
+      bMap.addEventListener("click", function () {
+        map.setView([s.lat, s.lon], 14);
+      });
+      row.appendChild(nav); row.appendChild(bMap);
+      div.appendChild(row);
+
+      var row2 = document.createElement("div");
+      row2.className = "fit-row";
+      row2.style.marginTop = "8px";
       var bFit = document.createElement("button");
       bFit.className = "small";
       bFit.textContent = "My rig fit here";
@@ -317,14 +435,22 @@
       bNo.textContent = "My rig did not fit";
       bFit.addEventListener("click", function () { recordFit(key, true); });
       bNo.addEventListener("click", function () { recordFit(key, false); });
-      var bMap = document.createElement("button");
-      bMap.className = "small secondary";
-      bMap.textContent = "Show on map";
-      bMap.addEventListener("click", function () {
-        map.setView([s.lat, s.lon], 14);
-      });
-      row.appendChild(bFit); row.appendChild(bNo); row.appendChild(bMap);
-      div.appendChild(row);
+      row2.appendChild(bFit); row2.appendChild(bNo);
+      div.appendChild(row2);
+
+      var row3 = document.createElement("div");
+      row3.className = "fit-row";
+      row3.style.marginTop = "8px";
+      var bFee = document.createElement("button");
+      bFee.className = "small secondary";
+      bFee.textContent = "Report fee";
+      var bWater = document.createElement("button");
+      bWater.className = "small secondary";
+      bWater.textContent = "Report water";
+      bFee.addEventListener("click", function () { recordFee(key); });
+      bWater.addEventListener("click", function () { recordWater(key); });
+      row3.appendChild(bFee); row3.appendChild(bWater);
+      div.appendChild(row3);
       listEl.appendChild(div);
     });
   }
