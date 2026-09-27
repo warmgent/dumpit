@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#1b5e20">
+<title>DUMPIT — Find RV Dump Stations</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231b5e20'/%3E%3Ctext x='32' y='44' font-family='Arial,sans-serif' font-size='36' font-weight='bold' fill='white' text-anchor='middle'%3ED%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #222; background: #f5f5f5; }
+  header { background: #1b5e20; color: #fff; padding: 14px 16px; }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: 2px; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: 0.9; }
+  main { padding: 12px 12px 40px; max-width: 760px; margin: 0 auto; }
+  .card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .card h2 { margin: 0 0 10px; font-size: 16px; }
+  #map { height: 320px; border-radius: 10px; }
+  button { font-size: 16px; padding: 12px 16px; border-radius: 8px; border: none; background: #1b5e20; color: #fff; cursor: pointer; }
+  button:active { opacity: 0.85; }
+  button.secondary { background: #e0e0e0; color: #222; }
+  button.small { font-size: 14px; padding: 8px 10px; }
+  button:disabled { opacity: 0.5; }
+  input[type="text"], input[type="number"] { width: 100%; font-size: 16px; padding: 10px; border: 1px solid #bbb; border-radius: 8px; margin-bottom: 8px; }
+  label { display: block; font-size: 14px; margin: 6px 0 4px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  #status { font-size: 14px; color: #555; margin-top: 8px; min-height: 20px; }
+  #error { display: none; background: #fdecea; color: #b3261e; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 12px; }
+  .station { border-top: 1px solid #eee; padding: 10px 0; }
+  .station:first-child { border-top: none; }
+  .station h3 { margin: 0 0 4px; font-size: 15px; }
+  .station .meta { font-size: 13px; color: #555; margin-bottom: 6px; }
+  .station .tags { font-size: 13px; color: #333; margin-bottom: 8px; }
+  .fit-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .fit-note { font-size: 13px; color: #1b5e20; font-weight: 600; }
+  .nofit-note { font-size: 13px; color: #b3261e; font-weight: 600; }
+  .filter-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .filter-row input { width: 20px; height: 20px; }
+  footer { text-align: center; font-size: 12px; color: #777; padding: 18px 12px; }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #1b5e20; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -3px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>DUMPIT</h1>
+  <p>Find RV dump stations near you — or along your route.</p>
+</header>
+<main>
+  <div id="error"></div>
+
+  <div class="card">
+    <h2>Your rig</h2>
+    <label for="rig">My rig length (feet)</label>
+    <div class="row">
+      <input type="number" id="rig" min="1" max="100" inputmode="numeric" placeholder="e.g. 35">
+      <button class="secondary" id="saveRig" style="flex:0 0 auto;">Save</button>
+    </div>
+    <label class="filter-row" style="margin-top:8px;">
+      <input type="checkbox" id="fitFilter">
+      <span>Only show stations my rig fits</span>
+    </label>
+  </div>
+
+  <div class="card">
+    <h2>Stations near me</h2>
+    <button id="nearMe">Find stations near me</button>
+    <div id="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>Stations along my route</h2>
+    <label for="from">From</label>
+    <input type="text" id="from" placeholder="e.g. Eugene, OR" autocomplete="off">
+    <label for="to">To</label>
+    <input type="text" id="to" placeholder="e.g. Boise, ID" autocomplete="off">
+    <button id="routeBtn">Find stations along route</button>
+  </div>
+
+  <div class="card">
+    <div id="map"></div>
+  </div>
+
+  <div class="card">
+    <h2 id="listTitle">Stations</h2>
+    <div id="list"><p style="color:#777;font-size:14px;">Search above to see dump stations here.</p></div>
+  </div>
+</main>
+<footer>
+  Station data: OpenStreetMap — coverage varies by area.<br>
+  Fit reports are from this phone only for now.
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter"
+  ];
+
+  var map = L.map("map").setView([39.5, -98.35], 4);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+
+  var markersLayer = L.layerGroup().addTo(map);
+  var routeLayer = L.layerGroup().addTo(map);
+  var stations = {};   // key "type/id" -> station object
+  var routeCoords = null; // [[lat,lng],...] of current route
+  var userLoc = null;  // [lat,lng]
+
+  var $ = function (id) { return document.getElementById(id); };
+  var statusEl = $("status"), errorEl = $("error"), listEl = $("list"), listTitle = $("listTitle");
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.style.display = "block";
+  }
+  function clearError() {
+    errorEl.style.display = "none";
+    errorEl.textContent = "";
+  }
+  function setStatus(html) { statusEl.innerHTML = html; }
+  function busy(msg) { setStatus('<span class="spinner"></span>' + msg); }
+
+  function kmToMi(km) { return km * 0.621371; }
+  function fmtDist(km) {
+    var mi = kmToMi(km);
+    return mi < 0.1 ? Math.round(mi * 5280) + " ft" : mi.toFixed(1) + " mi";
+  }
+
+  function haversineKm(a, b) {
+    var R = 6371, dLat = (b[0] - a[0]) * Math.PI / 180, dLon = (b[1] - a[1]) * Math.PI / 180;
+    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+
+  // ---- localStorage: rig length + fit reports ----
+  function getRig() {
+    var v = parseFloat(localStorage.getItem("dumpit_rig_ft"));
+    return isNaN(v) ? null : v;
+  }
+  function getReports() {
+    try { return JSON.parse(localStorage.getItem("dumpit_reports") || "[]"); }
+    catch (e) { return []; }
+  }
+  function saveReports(r) {
+    localStorage.setItem("dumpit_reports", JSON.stringify(r));
+  }
+  function stationFits(key) {
+    var rig = getRig();
+    if (!rig) return null;
+    var reps = getReports().filter(function (r) { return r.stationId === key && r.fit === true; });
+    var ok = reps.filter(function (r) { return (r.rigLength || 0) >= rig; });
+    return ok.length ? ok : (reps.length ? [] : null);
+  }
+
+  $("rig").value = getRig() || "";
+  $("saveRig").addEventListener("click", function () {
+    var v = parseFloat($("rig").value);
+    if (isNaN(v) || v <= 0) { showError("Please enter your rig length in feet first."); return; }
+    clearError();
+    localStorage.setItem("dumpit_rig_ft", String(v));
+    setStatus("Rig length saved: " + v + " ft.");
+    renderList();
+  });
+
+  // ---- Overpass ----
+  function overpassQuery(lat, lon, radiusM) {
+    return "[out:json][timeout:40];nwr[\"amenity\"=\"waste_disposal\"](around:" +
+      Math.round(radiusM) + "," + lat.toFixed(5) + "," + lon.toFixed(5) + ");out center tags;";
+  }
+
+  function fetchOverpass(lat, lon, radiusM) {
+    var q = overpassQuery(lat, lon, radiusM);
+    var attempt = function (i) {
+      return fetch(OVERPASS_URLS[i], {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "data=" + encodeURIComponent(q)
+      }).then(function (resp) {
+        if (!resp.ok) throw new Error("bad response " + resp.status);
+        return resp.json();
+      }).catch(function (err) {
+        if (i + 1 < OVERPASS_URLS.length) return attempt(i + 1);
+        throw err;
+      });
+    };
+    return attempt(0);
+  }
+
+  function ingestOverpass(data, refPoint) {
+    var els = (data && data.elements) || [];
+    els.forEach(function (el) {
+      var lat = el.lat, lon = el.lon;
+      if ((lat === undefined || lon === undefined) && el.center) { lat = el.center.lat; lon = el.center.lon; }
+      if (lat === undefined || lon === undefined) return;
+      var key = el.type + "/" + el.id;
+      var dist = refPoint ? haversineKm(refPoint, [lat, lon]) : null;
+      if (!stations[key]) {
+        stations[key] = { key: key, lat: lat, lon: lon, tags: el.tags || {}, distKm: dist };
+      } else if (dist !== null && (stations[key].distKm === null || dist < stations[key].distKm)) {
+        stations[key].distKm = dist;
+      }
+    });
+  }
+
+  function stationName(s) {
+    return (s.tags && s.tags.name) ? s.tags.name : "Unnamed dump station";
+  }
+
+  function stationTagLine(s) {
+    var bits = [];
+    var t = s.tags || {};
+    if (t.fee) bits.push("Fee: " + t.fee);
+    if (t.opening_hours) bits.push("Hours: " + t.opening_hours);
+    if (t.access) bits.push("Access: " + t.access);
+    return bits.join(" · ");
+  }
+
+  function drawMarkers() {
+    markersLayer.clearLayers();
+    var filterOn = $("fitFilter").checked;
+    var bounds = [];
+    Object.keys(stations).forEach(function (key) {
+      var s = stations[key];
+      if (filterOn && !(stationFits(key) && stationFits(key).length)) return;
+      var m = L.marker([s.lat, s.lon]).addTo(markersLayer);
+      m.bindPopup("<b>" + escapeHtml(stationName(s)) + "</b><br>" +
+        (s.distKm !== null ? fmtDist(s.distKm) + " away<br>" : "") +
+        escapeHtml(stationTagLine(s)));
+      bounds.push([s.lat, s.lon]);
+    });
+    if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function renderList() {
+    var filterOn = $("fitFilter").checked;
+    var rig = getRig();
+    var keys = Object.keys(stations).sort(function (a, b) {
+      var da = stations[a].distKm, db = stations[b].distKm;
+      if (da === null) return 1; if (db === null) return -1; return da - db;
+    });
+    if (filterOn && !rig) {
+      listEl.innerHTML = "<p style='color:#777;font-size:14px;'>Enter and save your rig length above to use this filter.</p>";
+      return;
+    }
+    var shown = keys.filter(function (k) {
+      if (!filterOn) return true;
+      var f = stationFits(k);
+      return f && f.length;
+    });
+    listTitle.textContent = "Stations (" + shown.length + ")";
+    if (!shown.length) {
+      listEl.innerHTML = "<p style='color:#777;font-size:14px;'>" +
+        (filterOn ? "No stations here are reported to fit your rig yet." :
+          "No dump stations found in this area — OpenStreetMap coverage varies by area.") + "</p>";
+      return;
+    }
+    listEl.innerHTML = "";
+    shown.forEach(function (key) {
+      var s = stations[key];
+      var div = document.createElement("div");
+      div.className = "station";
+      var h = document.createElement("h3");
+      h.textContent = stationName(s);
+      div.appendChild(h);
+      var meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = (s.distKm !== null ? fmtDist(s.distKm) + " away" : "");
+      div.appendChild(meta);
+      var tagLine = stationTagLine(s);
+      if (tagLine) {
+        var tg = document.createElement("div");
+        tg.className = "tags";
+        tg.textContent = tagLine;
+        div.appendChild(tg);
+      }
+      var fits = stationFits(key);
+      if (fits && fits.length) {
+        var fn = document.createElement("div");
+        fn.className = "fit-note";
+        var maxRig = Math.max.apply(null, fits.map(function (r) { return r.rigLength || 0; }));
+        fn.textContent = "✓ Reported to fit rigs up to " + maxRig + " ft";
+        div.appendChild(fn);
+      } else if (fits && !fits.length) {
+        var nn = document.createElement("div");
+        nn.className = "nofit-note";
+        nn.textContent = "Reported too small for your rig size";
+        div.appendChild(nn);
+      }
+      var row = document.createElement("div");
+      row.className = "fit-row";
+      row.style.marginTop = "8px";
+      var bFit = document.createElement("button");
+      bFit.className = "small";
+      bFit.textContent = "My rig fit here";
+      var bNo = document.createElement("button");
+      bNo.className = "small secondary";
+      bNo.textContent = "My rig did not fit";
+      bFit.addEventListener("click", function () { recordFit(key, true); });
+      bNo.addEventListener("click", function () { recordFit(key, false); });
+      var bMap = document.createElement("button");
+      bMap.className = "small secondary";
+      bMap.textContent = "Show on map";
+      bMap.addEventListener("click", function () {
+        map.setView([s.lat, s.lon], 14);
+      });
+      row.appendChild(bFit); row.appendChild(bNo); row.appendChild(bMap);
+      div.appendChild(row);
+      listEl.appendChild(div);
+    });
+  }
+
+  function recordFit(key, fit) {
+    var rig = getRig();
+    if (!rig) { showError("Save your rig length above first, so the report means something."); return; }
+    clearError();
+    var reps = getReports();
+    reps.push({ stationId: key, fit: fit, rigLength: rig, date: new Date().toISOString().slice(0, 10) });
+    saveReports(reps);
+    setStatus(fit ? "Thanks — recorded that your " + rig + " ft rig fit here." : "Recorded — noted as too small for a " + rig + " ft rig.");
+    renderList();
+  }
+
+  $("fitFilter").addEventListener("change", function () {
+    drawMarkers();
+    renderList();
+  });
+
+  function refresh() { drawMarkers(); renderList(); }
+
+  // ---- Near me ----
+  $("nearMe").addEventListener("click", function () {
+    clearError();
+    if (!navigator.geolocation) { showError("This phone or browser does not support location."); return; }
+    busy("Getting your location…");
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      userLoc = [pos.coords.latitude, pos.coords.longitude];
+      routeCoords = null;
+      routeLayer.clearLayers();
+      busy("Looking up dump stations near you…");
+      fetchOverpass(userLoc[0], userLoc[1], 50000).then(function (data) {
+        ingestOverpass(data, userLoc);
+        setStatus("");
+        refresh();
+        if (!Object.keys(stations).length) setStatus("No stations found within 30 miles — coverage varies by area.");
+      }).catch(function () {
+        setStatus("");
+        showError("Couldn't reach the station database — check your connection and try again.");
+      });
+    }, function () {
+      setStatus("");
+      showError("Couldn't get your location. Check that location access is allowed for this site, then try again.");
+    }, { timeout: 15000 });
+  });
+
+  // ---- Route search ----
+  function geocode(q) {
+    return fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(q), {
+      headers: { "Accept": "application/json" }
+    }).then(function (resp) {
+      if (!resp.ok) throw new Error("geocode failed");
+      return resp.json();
+    }).then(function (arr) {
+      if (!arr || !arr.length) throw new Error("not found: " + q);
+      return [parseFloat(arr[0].lat), parseFloat(arr[0].lon)];
+    });
+  }
+
+  function fetchRoute(a, b) {
+    var url = "https://router.project-osrm.org/route/v1/driving/" +
+      a[1] + "," + a[0] + ";" + b[1] + "," + b[0] + "?overview=full&geometries=geojson";
+    return fetch(url).then(function (resp) {
+      if (!resp.ok) throw new Error("route failed");
+      return resp.json();
+    }).then(function (j) {
+      if (!j.routes || !j.routes.length) throw new Error("no route");
+      return j.routes[0].geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
+    });
+  }
+
+  function sampleRoute(coords, everyKm) {
+    var pts = [coords[0]], acc = 0;
+    for (var i = 1; i < coords.length; i++) {
+      var seg = haversineKm(coords[i - 1], coords[i]);
+      acc += seg;
+      if (acc >= everyKm) { pts.push(coords[i]); acc = 0; }
+    }
+    var last = coords[coords.length - 1];
+    if (pts[pts.length - 1] !== last) pts.push(last);
+    return pts;
+  }
+
+  function nearestRouteDist(pt) {
+    if (!routeCoords) return null;
+    var best = null;
+    for (var i = 0; i < routeCoords.length; i++) {
+      var d = haversineKm(pt, routeCoords[i]);
+      if (best === null || d < best) best = d;
+    }
+    return best;
+  }
+
+  $("routeBtn").addEventListener("click", function () {
+    clearError();
+    var from = $("from").value.trim(), to = $("to").value.trim();
+    if (!from || !to) { showError("Enter both a starting point and a destination."); return; }
+    busy("Finding your route…");
+    geocode(from).then(function (a) {
+      return geocode(to).then(function (b) { return [a, b]; });
+    }).then(function (pair) {
+      busy("Planning route…");
+      return fetchRoute(pair[0], pair[1]);
+    }).then(function (coords) {
+      routeCoords = coords;
+      routeLayer.clearLayers();
+      L.polyline(coords, { color: "#1565c0", weight: 4 }).addTo(routeLayer);
+      var samples = sampleRoute(coords, 25);
+      busy("Looking up dump stations along your route (" + samples.length + " checkpoints)…");
+      var chain = Promise.resolve();
+      samples.forEach(function (pt) {
+        chain = chain.then(function () {
+          return fetchOverpass(pt[0], pt[1], 20000).then(function (data) {
+            ingestOverpass(data, null);
+          }).catch(function () { /* keep going on single-point failure */ });
+        });
+      });
+      return chain;
+    }).then(function () {
+      // distance of each station to the route
+      Object.keys(stations).forEach(function (k) {
+        var s = stations[k];
+        s.distKm = nearestRouteDist([s.lat, s.lon]);
+      });
+      setStatus("");
+      refresh();
+      if (!Object.keys(stations).length) setStatus("No stations found near this route — coverage varies by area.");
+    }).catch(function (err) {
+      setStatus("");
+      if (String(err && err.message).indexOf("not found") === 0) {
+        showError("Couldn't find that place name. Try adding a city and state, like 'Eugene, OR'.");
+      } else {
+        showError("Couldn't reach the station database or routing service — check your connection and try again.");
+      }
+    });
+  });
+
+  refresh();
+})();
+</script>
+</body>
+</html>
